@@ -14,7 +14,7 @@ let bd;
 async function initDB() {
     if (bd) return bd;
     bd = await open({
-        filename: "database.db", // /tmp es permitido, pero ephemeral
+        filename: "/tmp/database.db", // /tmp es permitido, pero ephemeral
         driver: sqlite3.Database,
     });
 
