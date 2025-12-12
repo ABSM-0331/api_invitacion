@@ -14,7 +14,7 @@ let bd;
 async function initDB() {
     if (bd) return bd;
     bd = await open({
-        filename: "/tmp/database.db", // /tmp es permitido, pero ephemeral
+        filename: "database.db", // /tmp es permitido, pero ephemeral
         driver: sqlite3.Database,
     });
 
@@ -49,7 +49,7 @@ app.post("/registro", async (req, res) => {
     res.json({ message: "Registro exitoso" });
 });
 
-app.get("/invitados", async (req, res) => {
+app.get("/api/invitados", async (req, res) => {
     const invitados = await bd.all(
         "SELECT id, familia, num_invitados FROM usuarios"
     );
@@ -64,8 +64,10 @@ app.post("/confirmacion", async (req, res) => {
     );
     res.json({ message: "Confirmación actualizada" });
 });
-
-app.get("/lista-completa", async (req, res) => {
+app.get("/api", async (req, res) => {
+    res.send("API is running");
+});
+app.get("/api/lista-completa", async (req, res) => {
     const listaCompleta = await bd.all("SELECT * FROM usuarios");
     res.json(listaCompleta);
 });
@@ -78,5 +80,6 @@ app.get("/codigo/:id", async (req, res) => {
     res.json(codigo);
 });
 
-// Exportar como serverless handler
-export default serverless(app);
+// const handler = serverless(app);
+// export default (req, res) => handler(req, res);
+export default app;
