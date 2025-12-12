@@ -39,7 +39,7 @@ app.use(async (req, res, next) => {
 });
 
 // Tus rutas (idénticas)
-app.post("/registro", async (req, res) => {
+app.post("/api/registro", async (req, res) => {
     const { familia, num_invitados, num_mesa } = req.body;
     const codigo = nanoid(10);
     await bd.run(
@@ -50,13 +50,17 @@ app.post("/registro", async (req, res) => {
 });
 
 app.get("/api/invitados", async (req, res) => {
-    const invitados = await bd.all(
-        "SELECT id, familia, num_invitados FROM usuarios"
-    );
-    res.json(invitados);
+    try {
+        const invitados = await bd.all(
+            "SELECT id, familia, num_invitados FROM usuarios"
+        );
+        res.json(invitados);
+    } catch (error) {
+        console.error("Error fetching invitados:", error);
+    }
 });
 
-app.post("/confirmacion", async (req, res) => {
+app.post("/api/confirmacion", async (req, res) => {
     const { id, confirmacion, invitados_confirmados } = req.body;
     await bd.run(
         "UPDATE usuarios SET confirmacion = ?, invitados_confirmados = ? WHERE id = ?",
@@ -72,7 +76,7 @@ app.get("/api/lista-completa", async (req, res) => {
     res.json(listaCompleta);
 });
 
-app.get("/codigo/:id", async (req, res) => {
+app.get("/api/codigo/:id", async (req, res) => {
     const { id } = req.params;
     const codigo = await bd.get("SELECT codigo FROM usuarios WHERE id = ?", [
         id,
