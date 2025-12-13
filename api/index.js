@@ -1,89 +1,118 @@
 import express from "express";
-import serverless from "serverless-http";
-import sqlite3 from "sqlite3";
-import { open } from "sqlite";
 import { nanoid } from "nanoid";
 import cors from "cors";
+import admin from "firebase-admin";
 
+admin.initializeApp({
+    credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_KEY)),
+});
+const bd = admin.firestore();
 const app = express();
 app.use(express.json());
 app.use(cors());
 
-// Abrir DB en /tmp (opcional) o archivo si solo pruebas — recuerda: no persistirá entre invocaciones
-let bd;
-async function initDB() {
-    if (bd) return bd;
-    bd = await open({
-        filename: "/tmp/database.db", // /tmp es permitido, pero ephemeral
-        driver: sqlite3.Database,
-    });
-
-    await bd.exec(`
-    CREATE TABLE IF NOT EXISTS usuarios (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        familia TEXT,
-        num_invitados TEXT,
-        invitados_confirmados TEXT,
-        num_mesa TEXT,
-        confirmacion TEXT,
-        codigo TEXT
-    )
-  `);
-    return bd;
-}
-
-// Middleware para asegurar DB inicializada
-app.use(async (req, res, next) => {
-    await initDB();
-    next();
-});
-
-// Tus rutas (idénticas)
 app.post("/api/registro", async (req, res) => {
-    const { familia, num_invitados, num_mesa } = req.body;
-    const codigo = nanoid(10);
-    await bd.run(
-        "INSERT INTO usuarios (familia, num_invitados, invitados_confirmados, num_mesa, confirmacion, codigo) VALUES (?, ?, ?, ?, ?, ?)",
-        [familia, num_invitados, "0", num_mesa, "pendiente", codigo]
-    );
-    res.json({ message: "Registro exitoso" });
+    try {
+        const { familia, num_invitados, num_mesa } = req.body;
+
+        if (!familia || !num_invitados || !num_mesa) {
+            return res.status(400).json({
+                message: "Todos los campos son obligatorios",
+            });
+        }
+
+        const codigo = nanoid(10);
+
+        await bd.collection("usuarios").add({
+            familia,
+            num_invitados: Number(num_invitados),
+            invitados_confirmados: 0,
+            num_mesa,
+            confirmacion: "pendiente",
+            codigo,
+        });
+
+        res.json({
+            message: "Registro exitoso",
+            codigo,
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            message: "Error al registrar",
+            error: error.message,
+        });
+    }
 });
 
 app.get("/api/invitados", async (req, res) => {
     try {
-        const invitados = await bd.all(
-            "SELECT id, familia, num_invitados FROM usuarios"
-        );
-        res.json(invitados);
+        const snapshot = await bd
+            .collection("usuarios")
+            .select("codigo", "familia", "num_invitados")
+            .get();
+
+        const data = snapshot.docs.map((doc) => doc.data());
+
+        res.json(data);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post("/api/confirmacion", async (req, res) => {
+    try {
+        const { codigo, confirmacion, invitados_confirmados } = req.body;
+
+        if (
+            !codigo ||
+            confirmacion === undefined ||
+            invitados_confirmados === undefined
+        ) {
+            return res.status(400).json({
+                message: "Datos incompletos",
+            });
+        }
+
+        // Buscar documento por código
+        const snapshot = await bd
+            .collection("usuarios")
+            .where("codigo", "==", codigo)
+            .limit(1)
+            .get();
+
+        if (snapshot.empty) {
+            return res.status(404).json({
+                message: "Registro no encontrado",
+            });
+        }
+
+        const docRef = snapshot.docs[0].ref;
+
+        await docRef.update({
+            confirmacion,
+            invitados_confirmados: Number(invitados_confirmados),
+        });
+
+        res.json({
+            message: "Confirmación actualizada",
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            message: "Error al actualizar confirmación",
+            error: error.message,
+        });
+    }
+});
+
+app.get("/api/lista-completa", async (req, res) => {
+    try {
+        const invitados = await bd.collection("usuarios").get();
+        res.json(invitados.docs.map((doc) => doc.data()));
     } catch (error) {
         console.error("Error fetching invitados:", error);
     }
 });
 
-app.post("/api/confirmacion", async (req, res) => {
-    const { id, confirmacion, invitados_confirmados } = req.body;
-    await bd.run(
-        "UPDATE usuarios SET confirmacion = ?, invitados_confirmados = ? WHERE id = ?",
-        [confirmacion, invitados_confirmados, id]
-    );
-    res.json({ message: "Confirmación actualizada" });
-});
-app.get("/api", async (req, res) => {
-    res.send("API is running");
-});
-app.get("/api/lista-completa", async (req, res) => {
-    const listaCompleta = await bd.all("SELECT * FROM usuarios");
-    res.json(listaCompleta);
-});
-
-app.get("/api/codigo/:id", async (req, res) => {
-    const { id } = req.params;
-    const codigo = await bd.get("SELECT codigo FROM usuarios WHERE id = ?", [
-        id,
-    ]);
-    res.json(codigo);
-});
-
-// const handler = serverless(app);
-// export default (req, res) => handler(req, res);
 export default app;
