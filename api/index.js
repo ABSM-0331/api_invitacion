@@ -30,6 +30,7 @@ app.post("/api/registro", async (req, res) => {
             num_mesa,
             confirmacion: "pendiente",
             codigo,
+            hora: null,
         });
 
         res.json({
@@ -49,7 +50,7 @@ app.get("/api/invitados", async (req, res) => {
     try {
         const snapshot = await bd
             .collection("usuarios")
-            .select("codigo", "familia", "num_invitados")
+            .select("codigo", "familia", "num_invitados", "num_mesa")
             .get();
 
         const data = snapshot.docs.map((doc) => doc.data());
@@ -105,13 +106,139 @@ app.post("/api/confirmacion", async (req, res) => {
         });
     }
 });
-
+app.put("/api/actualizar-invitado/:codigo", async (req, res) => {
+    try {
+        const { codigo } = req.params;
+        const { num_invitados, num_mesa } = req.body;
+        const snapshot = await bd
+            .collection("usuarios")
+            .where("codigo", "==", codigo)
+            .limit(1)
+            .get();
+        if (snapshot.empty) {
+            return res.status(404).json({
+                message: "Registro no encontrado",
+            });
+        }
+        const docRef = snapshot.docs[0].ref;
+        await docRef.update({
+            num_invitados: Number(num_invitados),
+            num_mesa: Number(num_mesa),
+        });
+        res.json({
+            message: "Invitado actualizado",
+        });
+    } catch (error) {}
+});
+app.delete("/api/eliminar-invitado/:codigo", async (req, res) => {
+    try {
+        const { codigo } = req.params;
+        const snapshot = await bd
+            .collection("usuarios")
+            .where("codigo", "==", codigo)
+            .limit(1)
+            .get();
+        if (snapshot.empty) {
+            return res.status(404).json({
+                message: "Registro no encontrado",
+            });
+        }
+        const docRef = snapshot.docs[0].ref;
+        await docRef.delete();
+        res.json({
+            message: "Invitado eliminado",
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            message: "Error al eliminar invitado",
+            error: error.message,
+        });
+    }
+});
 app.get("/api/lista-completa", async (req, res) => {
     try {
         const invitados = await bd.collection("usuarios").get();
         res.json(invitados.docs.map((doc) => doc.data()));
     } catch (error) {
         console.error("Error fetching invitados:", error);
+    }
+});
+app.get("/api/estadisticas", async (req, res) => {
+    try {
+        const totalSnapshot = await bd.collection("usuarios").count().get();
+        const validadosSnapshot = await bd
+            .collection("usuarios")
+            .where("hora", "!=", null)
+            .count()
+            .get();
+
+        res.json({
+            totalInvitados: totalSnapshot.data().count,
+            totalValidado: validadosSnapshot.data().count,
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Error al obtener estadísticas" });
+    }
+});
+app.get("/api/escaneados", async (req, res) => {
+    try {
+        const snapshot = await bd
+            .collection("usuarios")
+            .where("hora", "!=", null)
+            .get();
+        const data = snapshot.docs.map((doc) => doc.data());
+        res.json(data);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Error al obtener escaneados" });
+    }
+});
+app.put("/api/escanear/:codigo", async (req, res) => {
+    try {
+        const { codigo } = req.params;
+
+        const snapshot = await bd
+            .collection("usuarios")
+            .where("codigo", "==", codigo)
+            .limit(1)
+            .get();
+
+        if (snapshot.empty) {
+            return res.status(404).json({
+                message: "Código no válido",
+            });
+        }
+
+        const doc = snapshot.docs[0];
+        const docRef = doc.ref;
+
+        // ⏰ Formatear hora AM/PM
+        const ahora = new Date();
+        const horaFormateada = ahora.toLocaleString("es-MX", {
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: true,
+        });
+
+        await docRef.update({
+            hora: horaFormateada, // string tipo "03:45 PM"
+        });
+
+        res.json({
+            message: "Código válido",
+            invitado: {
+                ...doc.data(),
+                hora: horaFormateada,
+            },
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            message: "Error al validar código",
+            error: error.message,
+        });
     }
 });
 
