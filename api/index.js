@@ -13,11 +13,39 @@ app.use(cors());
 
 app.post("/api/guardartoken", async (req, res) => {
     try {
-        const { deviceID } = req.body;
-        bd.collection("tokens").add({ deviceID });
-        res.status(200).send("Token guardado exitosamente");
+        const { token } = req.body;
+
+        if (!token || typeof token !== "string") {
+            return res.status(400).json({
+                message: "Token inválido",
+            });
+        }
+
+        // Evitar duplicados
+        const existing = await bd
+            .collection("tokens")
+            .where("token", "==", token)
+            .limit(1)
+            .get();
+
+        if (!existing.empty) {
+            return res.status(200).json({
+                message: "Token ya registrado",
+            });
+        }
+
+        await bd.collection("tokens").add({
+            token,
+        });
+
+        return res.status(200).json({
+            message: "Token guardado correctamente",
+        });
     } catch (error) {
-        res.status(500).send("Error al guardar el token");
+        console.error("❌ Error guardando token:", error);
+        return res.status(500).json({
+            message: "Error al guardar el token",
+        });
     }
 });
 
