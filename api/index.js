@@ -11,6 +11,56 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
+app.post("/api/guardartoken", async (req, res) => {
+    try {
+        const { deviceID } = req.body;
+        bd.collection("tokens").add({ deviceID });
+        res.status(200).send("Token guardado exitosamente");
+    } catch (error) {
+        res.status(500).send("Error al guardar el token");
+    }
+});
+
+// app.post("/api/send", async (req, res) => {
+//     const { title, body, deviceID } = req.body;
+//     const message = {
+//         notification: {
+//             title,
+//             body,
+//         },
+//         token: deviceID,
+//         android: {
+//             priority: "high",
+//             notification: {
+//                 channel_id: "high_importance_channel",
+//             },
+//         },
+//         apns: {
+//             headers: {
+//                 "apns-priority": "10",
+//             },
+//             payload: {
+//                 aps: {
+//                     alert: {
+//                         title,
+//                         body,
+//                     },
+//                     sound: "default",
+//                 },
+//             },
+//         },
+//     };
+
+//     try {
+//         await admin.messaging().send(message);
+//         console.log("Notification sent successfully");
+//         res.status(200).send("Notification sent successfully");
+//     } catch (error) {
+//         console.log("Error sending notification: ", error);
+//         res.status(500).send("Error sending notification");
+//     }
+// });
+
 app.post("/api/registro", async (req, res) => {
     try {
         const { familia, num_invitados, num_mesa } = req.body;
@@ -75,37 +125,116 @@ app.post("/api/confirmacion", async (req, res) => {
             });
         }
 
-        // Buscar documento por código
-        const snapshot = await bd
+        // 1️⃣ Buscar usuario por código
+        const userSnapshot = await bd
             .collection("usuarios")
             .where("codigo", "==", codigo)
             .limit(1)
             .get();
 
-        if (snapshot.empty) {
+        if (userSnapshot.empty) {
             return res.status(404).json({
                 message: "Registro no encontrado",
             });
         }
 
-        const docRef = snapshot.docs[0].ref;
+        const userDoc = userSnapshot.docs[0];
+        const userRef = userDoc.ref;
+        const userData = userDoc.data();
 
-        await docRef.update({
+        // 2️⃣ Actualizar confirmación
+        await userRef.update({
             confirmacion,
             invitados_confirmados: Number(invitados_confirmados),
         });
 
-        res.json({
-            message: "Confirmación actualizada",
+        // 3️⃣ Enviar notificación si se confirmó (asistirá o no asistirá)
+        if (confirmacion === "Asistirá" || confirmacion === "no asistirá") {
+            // 🔹 Obtener tokens válidos
+            console.log("🔔 Preparando notificaciones...");
+            const tokensSnapshot = await bd.collection("tokens").get();
+
+            const tokens = tokensSnapshot.docs
+                .map((doc) => doc.data()?.token)
+                .filter(
+                    (token) => typeof token === "string" && token.length > 10
+                );
+
+            console.log("📱 Tokens válidos:", tokens);
+
+            if (tokens.length > 0) {
+                const notificationTitle =
+                    confirmacion === "Asistirá"
+                        ? "¡Confirmación registrada!"
+                        : "Confirmación recibida";
+                const notificationBody =
+                    confirmacion === "Asistirá"
+                        ? `${userData.familia} ha confirmado su asistencia`
+                        : `${userData.familia} ha indicado que no asistirá`;
+
+                const message = {
+                    tokens, // 👈 CLAVE (multicast)
+                    notification: {
+                        title: notificationTitle,
+                        body: notificationBody,
+                    },
+                    android: {
+                        priority: "high",
+                        notification: {
+                            channelId: "high_importance_channel",
+                        },
+                    },
+                    apns: {
+                        payload: {
+                            aps: {
+                                sound: "default",
+                            },
+                        },
+                    },
+                };
+
+                const response = await admin
+                    .messaging()
+                    .sendEachForMulticast(message);
+
+                console.log(
+                    "✅ Notificaciones enviadas:",
+                    response.successCount
+                );
+                console.log("❌ Fallidas:", response.failureCount);
+
+                // 🔥 Limpieza automática de tokens inválidos
+                response.responses.forEach(async (resp, index) => {
+                    if (!resp.success) {
+                        const failedToken = tokens[index];
+                        console.log(
+                            "🧹 Token inválido eliminado:",
+                            failedToken
+                        );
+
+                        const invalidTokenDocs = await bd
+                            .collection("tokens")
+                            .where("token", "==", failedToken)
+                            .get();
+
+                        invalidTokenDocs.forEach((doc) => doc.ref.delete());
+                    }
+                });
+            }
+        }
+
+        return res.json({
+            message: "Confirmación actualizada correctamente",
         });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({
+        console.error("❌ Error en /api/confirmacion:", error);
+        return res.status(500).json({
             message: "Error al actualizar confirmación",
             error: error.message,
         });
     }
 });
+
 app.put("/api/actualizar-invitado/:codigo", async (req, res) => {
     try {
         const { codigo } = req.params;
