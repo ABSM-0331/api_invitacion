@@ -128,7 +128,14 @@ app.get("/api/invitados", async (req, res) => {
     try {
         const snapshot = await bd
             .collection("usuarios")
-            .select("codigo", "familia", "num_invitados", "num_mesa")
+            .select(
+                "codigo",
+                "familia",
+                "num_invitados",
+                "num_mesa",
+                "confirmacion",
+                "invitados_confirmados"
+            )
             .get();
 
         const data = snapshot.docs.map((doc) => doc.data());
